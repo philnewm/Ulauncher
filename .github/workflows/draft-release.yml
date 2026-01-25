@@ -3,29 +3,47 @@ name: Draft release
 on:
   push:
     tags:
-      - "*"
+      - '*'
+
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag name'
+        default: 'test-tag'
 
 jobs:
-  draft_release:
+  release:
     runs-on: ubuntu-latest
-    container: ulauncher/build-image:6.4
     steps:
-      - uses: actions/checkout@v5
-      - name: Check
-        run: make check
-      - name: Build release
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Build deb release
         run: |
-          VERSION=$(make version)
-          echo "Building Ulauncher version: $VERSION"
-          ln -s /var/node_modules preferences-src # use node modules from cache
-          make deb DEB_DISTRO=focal
-          # make sure to run make sdist after make deb because make deb overwrites the tarball
-          make sdist
+          echo "Tag is created: $GITHUB_REF_NAME"
+          source ./scripts/common.sh
+          docker pull $BUILD_IMAGE
+          ./ul build-release $GITHUB_REF_NAME
+
+      - name: Build rpm release (AlmaLinux 9.7)
+        run: |
+          docker run --rm \
+            -v $PWD:/build \
+            -w /build \
+            almalinux:9.7 \
+            bash -c "
+              dnf -y install epel-release &&
+              dnf -y install rpm-build rpmdevtools python3 yarnpkg rsync python3-distutils-extra &&
+              ./ul build-preferences &&
+              ./ul build-rpm ${{ inputs.tag }} almalinux9 &&
+              cp /tmp/ulauncher_${{ inputs.tag }}_almalinux9.rpm /build/
+            "
 
       - name: Make draft GitHub release
         uses: softprops/action-gh-release@v1
         with:
           draft: true
           files: |
-            dist/*.tar.gz
-            dist/*.deb
+            *.tar.gz
+            *.deb
+            *.rpm
